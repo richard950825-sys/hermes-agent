@@ -1,6 +1,7 @@
 """Tests for tools/session_search_tool.py — helper functions and search dispatcher."""
 
 import json
+import asyncio
 import time
 import pytest
 
@@ -375,3 +376,52 @@ class TestSessionSearch:
         assert result["count"] == 0
         assert result["results"] == []
         assert result["sessions_searched"] == 0
+
+    def test_summarization_timeout_returns_raw_preview(self, monkeypatch):
+        """Slow auxiliary summarization should degrade to a raw preview quickly."""
+        from unittest.mock import MagicMock
+        from tools import session_search_tool
+
+        async def _slow_llm(*_args, **_kwargs):
+            await asyncio.sleep(1)
+
+        monkeypatch.setattr(session_search_tool, "async_call_llm", _slow_llm)
+        monkeypatch.setattr(
+            session_search_tool,
+            "SESSION_SUMMARY_TOTAL_TIMEOUT_SECONDS",
+            0.01,
+        )
+        monkeypatch.setattr(
+            session_search_tool,
+            "SESSION_SEARCH_TOTAL_TIMEOUT_SECONDS",
+            0.05,
+        )
+
+        mock_db = MagicMock()
+        mock_db.search_messages.return_value = [
+            {
+                "session_id": "old_sid",
+                "content": "weekly report status",
+                "source": "feishu",
+                "session_started": 1709500000,
+                "model": "test",
+            }
+        ]
+        mock_db.get_session.return_value = {"parent_session_id": None}
+        mock_db.get_messages_as_conversation.return_value = [
+            {"role": "user", "content": "weekly report status"},
+            {"role": "assistant", "content": "Phase 5.7.1 is complete."},
+        ]
+
+        result = json.loads(session_search_tool.session_search(
+            query="weekly report",
+            db=mock_db,
+            limit=1,
+        ))
+
+        assert result["success"] is True
+        assert result["count"] == 1
+        assert result["results"][0]["session_id"] == "old_sid"
+        assert result["results"][0]["summary"].startswith(
+            "[Raw preview — summarization unavailable]"
+        )

@@ -379,6 +379,38 @@ def _build_media_placeholder(event) -> str:
     return "\n".join(parts)
 
 
+def _empty_agent_response_message(result: dict | None) -> str:
+    """Return a user-visible fallback when the agent produced no text."""
+    if not result:
+        return (
+            "⚠️ Hermes finished without a visible reply. Try again, or use "
+            "/reset if this session looks stale."
+        )
+
+    error = result.get("error")
+    if error:
+        return f"⚠️ {error}"
+
+    if result.get("interrupted"):
+        return (
+            "⚠️ The previous request was interrupted before it produced a "
+            "reply. If you sent a slash command while it was running, send "
+            "that command again now."
+        )
+
+    if result.get("api_calls", 0) or result.get("messages"):
+        return (
+            "⚠️ Hermes finished the turn without a visible reply after "
+            "processing the request. Try again, or use /reset if the session "
+            "looks stale."
+        )
+
+    return (
+        "⚠️ Hermes produced no response. Try again, or use /reset if this "
+        "session looks stale."
+    )
+
+
 def _dequeue_pending_event(adapter, session_key: str) -> MessageEvent | None:
     """Consume and return the full pending event for a session.
 
@@ -8908,13 +8940,14 @@ class GatewayRunner:
             _resolved_model = getattr(_agent, "model", None) if _agent else None
 
             if not final_response:
-                error_msg = f"⚠️ {result['error']}" if result.get("error") else ""
+                error_msg = _empty_agent_response_message(result)
                 return {
                     "final_response": error_msg,
                     "messages": result.get("messages", []),
                     "api_calls": result.get("api_calls", 0),
                     "failed": result.get("failed", False),
                     "compression_exhausted": result.get("compression_exhausted", False),
+                    "interrupted": result.get("interrupted", False),
                     "tools": tools_holder[0] or [],
                     "history_offset": len(agent_history),
                     "last_prompt_tokens": _last_prompt_toks,

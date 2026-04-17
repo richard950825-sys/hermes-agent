@@ -303,6 +303,33 @@ class TestEmptyResponseNotSuppressed:
         self._apply_suppression_logic(response, sc)
         assert "already_sent" not in response
 
+
+class TestEmptyAgentResponseMessage:
+    def test_interrupted_empty_result_gets_visible_message(self):
+        """Interrupted runs with no final text should not become silent turns."""
+        from gateway.run import _empty_agent_response_message
+
+        msg = _empty_agent_response_message({
+            "final_response": None,
+            "interrupted": True,
+            "api_calls": 1,
+        })
+
+        assert "interrupted" in msg.lower()
+        assert "send that command again" in msg
+
+    def test_empty_non_failed_result_gets_visible_message(self):
+        """Non-failed empty results still need a user-visible fallback."""
+        from gateway.run import _empty_agent_response_message
+
+        msg = _empty_agent_response_message({
+            "final_response": "",
+            "messages": [{"role": "tool", "content": "result"}],
+            "api_calls": 1,
+        })
+
+        assert "without a visible reply" in msg
+
 class TestQueuedMessageAlreadyStreamed:
     """The queued-message path should skip the first response only when the
     final response was actually streamed."""
