@@ -1169,41 +1169,6 @@ class TestTryPaymentFallback:
         assert model == "gpt-5.2-codex"
         assert label == "openai-codex"
 
-    def test_auto_failure_skips_main_custom_endpoint(self):
-        """Auto failures should not fall back to the same custom main endpoint."""
-        mock_custom = MagicMock()
-        with patch("agent.auxiliary_client._try_openrouter", return_value=(None, None)), \
-             patch("agent.auxiliary_client._try_nous", return_value=(None, None)), \
-             patch("agent.auxiliary_client._try_custom_endpoint", return_value=(mock_custom, "gpt-5.4")) as custom_try, \
-             patch("agent.auxiliary_client._try_codex", return_value=(MagicMock(), "gpt-5.2-codex")) as codex_try, \
-             patch("agent.auxiliary_client._resolve_api_key_provider", return_value=(None, None)), \
-             patch("agent.auxiliary_client._read_main_provider", return_value="custom"):
-            client, model, label = _try_payment_fallback("auto", task="session_search")
-
-        custom_try.assert_not_called()
-        codex_try.assert_not_called()
-        assert client is None
-        assert model is None
-        assert label == ""
-
-    def test_auto_failure_skips_named_custom_main_endpoint(self):
-        """Named custom main providers map to the local/custom fallback label."""
-        mock_custom = MagicMock()
-        mock_api_key = MagicMock()
-        with patch("agent.auxiliary_client._try_openrouter", return_value=(None, None)), \
-             patch("agent.auxiliary_client._try_nous", return_value=(None, None)), \
-             patch("agent.auxiliary_client._try_custom_endpoint", return_value=(mock_custom, "llama3")) as custom_try, \
-             patch("agent.auxiliary_client._try_codex", return_value=(MagicMock(), "gpt-5.2-codex")) as codex_try, \
-             patch("agent.auxiliary_client._resolve_api_key_provider", return_value=(mock_api_key, "fast-aux-model")), \
-             patch("agent.auxiliary_client._read_main_provider", return_value="custom:ollama-local"):
-            client, model, label = _try_payment_fallback("auto", task="session_search")
-
-        custom_try.assert_not_called()
-        codex_try.assert_not_called()
-        assert client is mock_api_key
-        assert model == "fast-aux-model"
-        assert label == "api-key"
-
 
 class TestCallLlmPaymentFallback:
     """call_llm() retries with a different provider on 402 / payment errors."""

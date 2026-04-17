@@ -25,10 +25,6 @@ from typing import Dict, Any, List, Optional, Union
 from agent.auxiliary_client import async_call_llm, extract_content_or_reasoning
 MAX_SESSION_CHARS = 100_000
 MAX_SUMMARY_TOKENS = 10000
-SESSION_SUMMARY_CALL_TIMEOUT_SECONDS = 10.0
-SESSION_SUMMARY_TOTAL_TIMEOUT_SECONDS = 25.0
-SESSION_SEARCH_TOTAL_TIMEOUT_SECONDS = 30.0
-SESSION_SUMMARY_MAX_RETRIES = 1
 
 
 def _format_timestamp(ts: Union[int, float, str, None]) -> str:
@@ -203,7 +199,7 @@ async def _summarize_session(
         f"Summarize this conversation with focus on: {query}"
     )
 
-    max_retries = SESSION_SUMMARY_MAX_RETRIES
+    max_retries = 3
     for attempt in range(max_retries):
         try:
             response = await async_call_llm(
@@ -214,7 +210,6 @@ async def _summarize_session(
                 ],
                 temperature=0.1,
                 max_tokens=MAX_SUMMARY_TOKENS,
-                timeout=SESSION_SUMMARY_CALL_TIMEOUT_SECONDS,
             )
             content = extract_content_or_reasoning(response)
             if content:
@@ -426,56 +421,14 @@ def session_search(
                     exc_info=True,
                 )
 
-        async def _summarize_one(text: str, meta: Dict[str, Any]) -> Optional[str]:
-            try:
-                return await asyncio.wait_for(
-                    _summarize_session(text, query, meta),
-                    timeout=SESSION_SUMMARY_TOTAL_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                logging.warning(
-                    "Session summarization timed out after %.1fs; using raw preview",
-                    SESSION_SUMMARY_TOTAL_TIMEOUT_SECONDS,
-                )
-                return None
-
-        # Summarize all sessions in parallel, but never let recall block the
-        # main turn indefinitely. Slow or unavailable auxiliary models degrade
-        # to raw previews below.
-        async def _summarize_all() -> List[Union[str, Exception, None]]:
+        # Summarize all sessions in parallel
+        async def _summarize_all() -> List[Union[str, Exception]]:
             """Summarize all sessions in parallel."""
-            pending_tasks = [
-                asyncio.create_task(_summarize_one(text, meta))
+            coros = [
+                _summarize_session(text, query, meta)
                 for _, _, text, meta in tasks
             ]
-            if not pending_tasks:
-                return []
-
-            done, pending = await asyncio.wait(
-                pending_tasks,
-                timeout=SESSION_SEARCH_TOTAL_TIMEOUT_SECONDS,
-            )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-                logging.warning(
-                    "Session search summarization hit %.1fs total timeout; "
-                    "using raw previews for %d unfinished session(s)",
-                    SESSION_SEARCH_TOTAL_TIMEOUT_SECONDS,
-                    len(pending),
-                )
-
-            results: List[Union[str, Exception, None]] = []
-            for task in pending_tasks:
-                if task in pending:
-                    results.append(None)
-                    continue
-                try:
-                    results.append(task.result())
-                except Exception as exc:
-                    results.append(exc)
-            return results
+            return await asyncio.gather(*coros, return_exceptions=True)
 
         try:
             # Use _run_async() which properly manages event loops across

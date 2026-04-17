@@ -1218,30 +1218,13 @@ def _try_payment_fallback(
     # (e.g. main_provider="openrouter" → skip "openrouter" in chain)
     main_provider = _read_main_provider()
     skip_labels = {skip}
-    if skip in ("auto", "") and main_provider:
-        # A failed auto route may already have used the main provider in
-        # _resolve_auto(). Do not immediately re-enter the same backend under
-        # its fallback-chain label (for custom, that label is local/custom).
-        skip_labels.add(main_provider.lower())
-    elif main_provider and main_provider.lower() in skip:
+    if main_provider and main_provider.lower() in skip:
         skip_labels.add(main_provider.lower())
     # Map common resolved_provider values back to chain labels.
     _alias_to_label = {"openrouter": "openrouter", "nous": "nous",
                        "openai-codex": "openai-codex", "codex": "openai-codex",
                        "custom": "local/custom", "local/custom": "local/custom"}
-
-    def _chain_label(label: str) -> str:
-        if label.startswith("custom"):
-            return "local/custom"
-        return _alias_to_label.get(label, label)
-
-    skip_chain_labels = {_chain_label(s) for s in skip_labels}
-    if task == "session_search":
-        # Recall summarization is optional and already has a raw-preview
-        # fallback. Avoid routing large recall prompts to Codex OAuth unless
-        # the user explicitly configured that as the primary provider; model
-        # availability varies by account.
-        skip_chain_labels.add("openai-codex")
+    skip_chain_labels = {_alias_to_label.get(s, s) for s in skip_labels}
 
     tried = []
     for label, try_fn in _get_provider_chain():
